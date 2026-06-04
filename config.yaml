@@ -1,0 +1,56 @@
+assets:
+  - BTCUSDT
+  - ETHUSDT
+
+data:
+  raw_dir: data/raw
+  interim_dir: data/interim
+  processed_dir: data/processed
+  resample_frequency: "1s"
+  book_levels: 5
+
+  binance:
+    ws_base_url: "wss://stream.binance.com:9443"
+    rest_base_url: "https://api.binance.com"
+    data_vision_base_url: "https://data.binance.vision"
+    depth_levels: 10
+    depth_update_speed: "100ms"
+
+features:
+  imbalance_levels: [1, 3, 5]
+  trade_windows: ["1s", "5s", "10s"]
+  volatility_windows: ["10s", "30s", "60s"]
+  return_lags: ["1s", "5s", "10s", "30s"]
+
+targets:
+  horizons: ["1s", "5s", "10s", "30s"]
+  threshold_type: "half_spread"
+
+validation:
+  train_fraction: 0.6
+  validation_fraction: 0.2
+  test_fraction: 0.2
+  walk_forward_train_days: 5
+  walk_forward_validation_days: 1
+  walk_forward_test_days: 1
+
+backtest:
+  signal_quantile_long: 0.9
+  signal_quantile_short: 0.1
+  cost_scenarios:
+    zero:
+      fee_bps: 0
+      slippage_bps: 0
+      spread_multiplier: 0
+    low:
+      fee_bps: 1
+      slippage_bps: 0.5
+      spread_multiplier: 0.5
+    medium:
+      fee_bps: 2
+      slippage_bps: 1
+      spread_multiplier: 1.0
+    high:
+      fee_bps: 5
+      slippage_bps: 2
+      spread_multiplier: 1.0
