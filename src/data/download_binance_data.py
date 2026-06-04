@@ -306,7 +306,7 @@ class RESTCollector:
 # Historical bulk download from data.binance.vision
 # ---------------------------------------------------------------------------
 
-TRADE_COLS = [
+SPOT_TRADE_COLS = [
     "trade_id", "price", "quantity", "quote_quantity",
     "timestamp_ms", "is_buyer_maker", "is_best_match",
 ]
@@ -347,11 +347,30 @@ def download_historical_trades(
                 resp.raise_for_status()
 
                 with ZipFile(BytesIO(resp.content)) as zf:
-                    with zf.open(zf.namelist()[0]) as f:
-                        df = pd.read_csv(f, header=None, names=TRADE_COLS)
+                    with zf.open(csv_name := zf.namelist()[0]) as f:
+                        # Futures CSVs have a header row; spot CSVs don't
+                        first_line = f.readline().decode().strip()
+                        f.seek(0)
+                        has_header = first_line.startswith("id,") or "is_buyer_maker" in first_line
+
+                        if has_header:
+                            df = pd.read_csv(f)
+                            df.columns = [c.strip() for c in df.columns]
+                            col_map = {
+                                "id": "trade_id",
+                                "qty": "quantity",
+                                "quote_qty": "quote_quantity",
+                                "time": "timestamp_ms",
+                            }
+                            df.rename(columns=col_map, inplace=True)
+                        else:
+                            df = pd.read_csv(f, header=None, names=SPOT_TRADE_COLS)
 
                 df["timestamp"] = pd.to_datetime(df["timestamp_ms"], unit="ms", utc=True)
-                df["is_buyer_maker"] = df["is_buyer_maker"].astype(bool)
+                df["is_buyer_maker"] = df["is_buyer_maker"].map(
+                    {True: True, False: False, "True": True, "False": False,
+                     "true": True, "false": False}
+                ).astype(bool)
                 df = df[["timestamp", "trade_id", "price", "quantity", "is_buyer_maker"]]
                 df["price"] = df["price"].astype(float)
                 df["quantity"] = df["quantity"].astype(float)
