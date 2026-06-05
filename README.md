@@ -182,25 +182,23 @@ run_full_eda(datasets)
 
 ## Future Work
 
-- Obtain 30+ consecutive days for proper rolling walk-forward validation
-- Add gradient boosting / neural network model comparison
-- Implement realistic limit order execution simulation with queue position modeling
-- Apply to equities (LOBSTER data) for cross-market validation
-- Build time-conditional model (restrict trading to high-IC hours)
-- Explore cross-asset signals (BTC book → ETH prediction)
-- Quantify latency-adjusted signal decay
+### Data Extensions
+- **Contiguous multi-day data**: Obtain 30+ consecutive days (Tardis paid tier or WebSocket collection) for proper rolling walk-forward validation and multi-day persistence analysis
+- **Higher resolution**: Use 100ms or 10ms snapshots to capture faster signal dynamics and refine the signal half-life estimate
+- **Full book depth**: Leverage Tardis's 25-level snapshots (currently using top 10) for richer depth features
 
-## Resume Bullets
+### Cross-Market Validation
+- **US equities via LOBSTER**: Apply the same pipeline to NASDAQ LOB data (e.g., AAPL, MSFT, SPY) to test whether microstructure signals generalize beyond crypto — equities have different tick sizes, maker-taker rebates, dark pool fragmentation, and regulatory structure
+- **FX markets**: Test on major currency pairs where LOB data is available through EBS or similar platforms, introducing market structure with no closing auction and continuous 24/5 trading
+- **Cross-asset signals**: Use BTC book state to predict ETH returns (and vice versa), exploiting lead-lag relationships between correlated instruments
 
-- Researched short-horizon alpha signals on 7 days of limit order book data (~605K observations per asset) using order book imbalance, microprice, spread, and signed order-flow features; achieved walk-forward Pearson IC of 0.06–0.26 (t-stat up to 31.5) across 1–30s horizons for BTCUSDT and ETHUSDT.
-- Built walk-forward validation and transaction-cost-aware backtesting framework for high-frequency mid-price prediction; analyzed gross/net Sharpe, turnover, hit rate, and cost sensitivity across 4 fee scenarios, demonstrating that no horizon survived medium costs over 7 trading days.
-- Found that microstructure signals showed robust statistical predictive power (IC > 0 at all horizons with high significance) but were entirely non-tradable under realistic costs, quantifying the precise gap between statistical alpha and tradable alpha.
+### Modeling Improvements
+- **Non-linear models**: Gradient boosting (LightGBM/XGBoost) and attention-based neural networks for potential IC improvement, with careful regularization given the noise level
+- **Time-conditional models**: Restrict trading to high-IC hours (e.g., UTC 5, 10–11, 20) where the signal is 3–4× stronger, potentially making certain sessions tradable
+- **Online learning**: Adaptive models that re-train on recent data to capture regime shifts
 
-## STAR Interview Explanation
-
-| Component | Description |
-|-----------|-------------|
-| **Situation** | Investigated whether short-term supply-demand imbalance visible in the limit order book could predict near-term mid-price movement in crypto futures markets. |
-| **Task** | Built a complete research pipeline to clean L2 order book and trade data, engineer microstructure features, validate predictive power out-of-sample with chronological and walk-forward splits, and evaluate whether the signal survived realistic transaction costs. |
-| **Action** | Collected 7 days of 10-level order book snapshots and tick-level trades (32M+ BTC, 54M+ ETH trades) from Tardis.dev historical archives. Constructed 58 features including order book imbalance, weighted imbalance, microprice deviation, spread, signed trade volume, volatility, and lagged returns. Defined targets at 1s, 5s, 10s, and 30s horizons. Evaluated Ridge regression via walk-forward validation (IC/rank IC), analyzed signal decay, ran feature ablation across 4 feature groups, and implemented a decile-sorted long-short backtest under 4 cost scenarios. Assessed robustness across volatility, liquidity, and time-of-day regimes for both assets. |
-| **Result** | Demonstrated statistically significant predictability (IC = 0.06–0.26, t-stat up to 31.5) that decayed from 1s to 30s. Transaction costs eliminated profitability at all horizons (gross Sharpe 1.5–104 → net Sharpe deeply negative). Order book features proved more stable than trade features across 7 months of diverse market conditions. The signal was strongest in low-volatility regimes (IC = 0.26) and degraded sharply in high-volatility conditions (IC = 0.10). |
+### Execution Realism
+- **Queue position simulation**: Model fill probability as a function of queue depth, order size, and adverse selection
+- **Market impact modeling**: Estimate permanent and temporary price impact for realistic capacity analysis
+- **Latency-adjusted decay**: Quantify how signal IC degrades as a function of execution delay (1ms, 10ms, 100ms, 1s)
+- **Maker rebate analysis**: Incorporate exchange fee rebates for passive orders, which could shift the break-even point

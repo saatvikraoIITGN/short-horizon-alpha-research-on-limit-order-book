@@ -63,13 +63,58 @@ Order book snapshots (already at 1s from the Tardis conversion) were forward-fil
 
 ## 3. Feature Construction
 
-All 58 engineered features are motivated by market microstructure theory and are interpretable. See Section 3 of the previous version for full feature descriptions: order book features (21 columns), trade-flow features (6 columns), return/volatility features, and time controls.
+All 58 engineered features are motivated by market microstructure theory and are interpretable.
+
+### 3.1 Order Book Features (21 columns)
+
+- **Mid-price**: `(best_bid + best_ask) / 2`
+- **Spread**: absolute and relative (`spread / mid_price`)
+- **Order Book Imbalance (OBI)**: `(bid_depth - ask_depth) / (bid_depth + ask_depth)` at levels 1, 3, 5, and 10. OBI captures directional pressure from queued limit orders — when bid depth dominates, it signals buying interest and upward pressure.
+- **Weighted OBI**: Inverse-distance weighted (`weight_i = 1/i`), giving more importance to top-of-book levels where execution is most likely.
+- **Microprice**: `(ask_price × bid_size + bid_price × ask_size) / (bid_size + ask_size)` — a size-weighted fair value estimate. Microprice deviation from mid-price signals the direction of imbalance.
+- **Depth features**: total depth (bid+ask across 10 levels), top-level depth, depth slope (how quickly liquidity decays across levels), and per-level imbalance.
+
+### 3.2 Trade-Flow Features (6 columns)
+
+Beyond the basic rolling aggregations computed during resampling (volume, count, buy/sell split for 1s, 5s, 10s windows), we add:
+- **Large trade indicator**: flags windows where total volume exceeds 3× the rolling median — detects institutional activity.
+- **Volume shock**: current-window volume relative to a 30s rolling average — captures sudden liquidity events.
+
+### 3.3 Return and Volatility Features
+
+- **Lagged log-returns** at 1s, 5s, 10s, 30s — captures short-term momentum and mean-reversion.
+- **Realized volatility** over 10s, 30s, 60s windows — rolling standard deviation of 1s returns.
+- **Rolling z-scores** for returns, spread, and volume — normalizes features relative to recent history, helping models adapt to regime changes.
+
+### 3.4 Time Controls
+
+- Hour of day, minute of hour, day of week — controls for well-known intraday seasonality patterns in volume, volatility, and spread.
+
+### 3.5 Summary Statistics
+
+BTCUSDT spreads are extremely tight at the minimum tick size ($0.01, or ~0.01 bps relative for BTC; ~0.6 bps for ETH). OBI is roughly symmetric (mean ≈ 0, std ≈ 0.70 for BTC), confirming no persistent directional bias across the 7-month sample. Return distributions are approximately symmetric with near-zero means at all horizons. Return volatility scales approximately as √h — 1s std of ~0.6 bps (BTC) growing to ~3.8 bps at 30s — consistent with near-diffusive behavior at these frequencies.
 
 ---
 
 ## 4. Prediction Targets
 
-Forward log-returns at horizons h ∈ {1s, 5s, 10s, 30s}, plus binary direction and half-spread threshold classification targets.
+### 4.1 Regression Targets
+
+Forward log-returns at horizons h ∈ {1s, 5s, 10s, 30s}:
+
+`y_return_h = log(mid_price[t+h] / mid_price[t])`
+
+### 4.2 Classification Targets
+
+- **Binary direction**: `y_direction_h = 1 if y_return_h > 0, else 0`
+- **Half-spread threshold**: A three-class target requiring the price change to exceed half the current spread, filtering out economically insignificant moves:
+  - `+1` if `price_change > 0.5 × spread`
+  - `-1` if `price_change < -0.5 × spread`
+  - `0` otherwise
+
+### 4.3 Economic Relevance
+
+The half-spread target is important because at BTCUSDT's minimum tick ($0.01), a large fraction of 1s returns are exactly zero — the price simply hasn't moved. The half-spread filter ensures we only predict moves large enough to potentially profit from after crossing the spread.
 
 ---
 
@@ -154,7 +199,20 @@ Notably, combining all features yields slightly *lower* IC than order book featu
 - **Flat**: otherwise
 - Hold for exactly h seconds; no overlapping trades
 
-### 8.2 Results — BTCUSDT
+### 8.2 Transaction Cost Scenarios
+
+Four scenarios model increasing execution friction:
+
+| Scenario | Fee (round-trip, bps) | Slippage (bps) | Spread cost |
+|----------|----------------------|-----------------|-------------|
+| Zero | 0 | 0 | 0× spread |
+| Low | 2 | 0.5 | 0.5× spread |
+| Medium | 4 | 1 | 1.0× spread |
+| High | 10 | 2 | 1.0× spread |
+
+The "medium" scenario approximates a typical retail or low-VIP Binance Futures trader. The "low" scenario represents a VIP-tier trader with maker rebates.
+
+### 8.3 Results — BTCUSDT
 
 | Horizon | Gross Sharpe | Net Sharpe (low) | Net Sharpe (medium) | Net Sharpe (high) | Hit Rate | Trades |
 |---------|-------------|------------------|---------------------|-------------------|----------|--------|
@@ -163,7 +221,7 @@ Notably, combining all features yields slightly *lower* IC than order book featu
 | 10s | 19.8 | -11.0 | -36.2 | -68.3 | 48.4% | 11,827 |
 | 30s | 1.5 | -5.1 | -11.4 | -25.4 | 48.0% | 5,326 |
 
-### 8.3 Results — ETHUSDT
+### 8.4 Results — ETHUSDT
 
 | Horizon | Gross Sharpe | Net Sharpe (low) | Net Sharpe (medium) | Net Sharpe (high) | Hit Rate | Trades |
 |---------|-------------|------------------|---------------------|-------------------|----------|--------|
@@ -172,7 +230,7 @@ Notably, combining all features yields slightly *lower* IC than order book featu
 | 10s | 18.6 | -8.3 | -31.3 | -64.3 | 49.3% | 12,147 |
 | 30s | 7.1 | 1.6 | -3.9 | -16.8 | 49.9% | 5,481 |
 
-### 8.4 Interpretation
+### 8.5 Interpretation
 
 With the full 7-day dataset, the backtest results are more pessimistic — and more realistic — than the 2-hour preliminary:
 
@@ -264,13 +322,36 @@ These findings are consistent with the academic literature and the operational r
 
 ### What Would Improve This Research
 
-- **Contiguous multi-day data**: 30+ consecutive days for proper rolling walk-forward
-- **Higher resolution**: 100ms snapshots to capture faster signal dynamics
-- **Non-linear models**: Gradient boosting or attention-based models for IC improvement
-- **Execution simulation**: Queue position and fill probability modeling
-- **Time-conditional signals**: Restrict trading to high-IC hours
-- **Cross-asset signals**: Use BTC book state to predict ETH returns
-- **Latency analysis**: Quantify signal decay under realistic execution delays
+**Data extensions**:
+- **Contiguous multi-day data**: 30+ consecutive days for proper rolling walk-forward validation, multi-day persistence analysis, and day-of-week effects. Tardis.dev paid tier or multi-day WebSocket collection would enable this.
+- **Higher resolution**: 100ms or 10ms snapshots from the raw Tardis tick data (already archived) to capture faster signal dynamics and refine the half-life estimate below 5 seconds.
+- **Full book depth**: Leverage the full 25 levels available in the Tardis data (currently using top 10) for richer depth slope and deep-level imbalance features.
+
+**Cross-market validation**:
+- **US equities via LOBSTER**: Apply the identical pipeline to NASDAQ L3 order book data (e.g., AAPL, MSFT, SPY) to test whether microstructure predictability generalizes beyond crypto. Equities introduce different structural features — discrete tick sizes affecting spread distributions, maker-taker rebate structures that change execution economics, dark pool fragmentation that reduces visible book informativeness, and regulatory constraints (e.g., Reg NMS) that shape order routing.
+- **FX markets**: Test on major currency pairs (EUR/USD, USD/JPY) via EBS or similar platforms, where continuous 24/5 trading and decentralized structure provide a contrasting market microstructure.
+- **Cross-asset signals**: Exploit lead-lag relationships — use BTC book state to predict ETH returns and vice versa. Crypto markets show strong cross-asset correlations that may create exploitable information transmission delays.
+
+**Modeling improvements**:
+- **Non-linear models**: Gradient boosting (LightGBM/XGBoost) and simple attention-based neural networks for potential IC improvement, with careful walk-forward evaluation to detect overfitting.
+- **Time-conditional models**: The 10× variation in IC across hours suggests restricting trading to high-IC periods (UTC 5, 10–11, 20) could make the signal conditionally tradable during calmer sessions.
+- **Online/adaptive learning**: Models that re-train on recent data to capture regime shifts, particularly useful for adapting to changing volatility and liquidity conditions.
+
+**Execution realism**:
+- **Queue position simulation**: Model fill probability as a function of queue depth, order size, and adverse selection — the most critical gap between our backtest and reality.
+- **Market impact modeling**: Estimate permanent and temporary price impact for realistic capacity analysis; even small orders can move thin crypto books.
+- **Maker rebate analysis**: Binance offers maker fee rebates (-0.25 bps for VIP tiers). Incorporating rebates could shift the break-even point for passive limit-order strategies, potentially making longer horizons viable.
+- **Latency-adjusted signal decay**: Quantify how IC degrades as a function of execution delay (1ms, 10ms, 100ms, 1s) — this would precisely map the infrastructure requirements for profitable exploitation.
+
+---
+
+## 12. References
+
+- Glosten, L. R., & Milgrom, P. R. (1985). Bid, ask and transaction prices in a specialist market with heterogeneously informed traders. *Journal of Financial Economics*, 14(1), 71–100.
+- Kyle, A. S. (1985). Continuous auctions and insider trading. *Econometrica*, 53(6), 1315–1335.
+- Cont, R., Kukanov, A., & Stoikov, S. (2014). The price impact of order book events. *Journal of Financial Econometrics*, 12(1), 47–88.
+- Cartea, Á., Jaimungal, S., & Penalva, J. (2015). *Algorithmic and High-Frequency Trading*. Cambridge University Press.
+- Cao, C., Chen, Y., Liang, B., & Lo, A. W. (2013). Can hedge funds time market liquidity? *Journal of Financial Economics*, 109(2), 493–516.
 
 ---
 
